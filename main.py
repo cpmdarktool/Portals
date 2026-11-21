@@ -9,9 +9,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# --- НАСТРОЙКИ ---
-# Токен берется из переменных окружения Render
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ==========================================
+# ВСТАВЬ СВОЙ НОВЫЙ ТОКЕН СЮДА (В КАВЫЧКИ):
+BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho"
+# ==========================================
+
 SECRET_KEY = "/unlock_8f3k2m9x" 
 
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +23,6 @@ dp = Dispatcher()
 AUTHORIZED_USERS = set()
 
 # --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
-# Render требует, чтобы Web Service слушал порт. Этот блок создает видимость сайта.
 app = Flask(__name__)
 
 @app.route('/')
@@ -110,7 +111,6 @@ async def decline_offer(callback: types.CallbackQuery):
     await callback.answer("Вы отклонили предложение. (Тестовое действие)", show_alert=True)
 
 async def main():
-    # Запускаем Flask в фоне, чтобы Render думал, что это сайт
     Thread(target=run_flask, daemon=True).start()
     print("Бот запущен. Ожидание секретного ключа...")
     await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query"])
