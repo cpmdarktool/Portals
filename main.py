@@ -149,23 +149,13 @@ async def start_command(message: types.Message):
     role = get_user_role(user_id)
 
     if role in ["admin", "user"]:
-        await message.answer("✅ У вас есть доступ. Используйте /price для создания офера.")
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📩 Запросить доступ", callback_data=f"request:{user_id}")]
-    ])
-    await message.answer("👋 Привет! Для использования бота вам нужно запросить доступ.", reply_markup=keyboard)
-
-@dp.callback_query(F.data.startswith("request:"))
-async def request_access(callback: types.CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    
     admin_text = (
         f"🔔 <b>Новая заявка на доступ!</b>\n\n"
-        f"👤 Имя: {callback.from_user.full_name}\n"
+        f"👤 Имя: {message.from_user.full_name}\n"
         f"🆔 ID: <code>{user_id}</code>\n"
-        f"🔗 Юзернейм: @{callback.from_user.username or 'нет'}"
+        f"🔗 Юзернейм: @{message.from_user.username or 'нет'}"
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -177,10 +167,8 @@ async def request_access(callback: types.CallbackQuery):
 
     try:
         await bot.send_message(MAIN_ADMIN_ID, admin_text, reply_markup=keyboard)
-        await callback.message.edit_text("⏳ Заявка отправлена администратору.")
     except Exception as e:
         logging.error(f"Ошибка при отправке заявки: {e}")
-    await callback.answer()
 
 @dp.message(F.text == "/adminpanel")
 async def admin_panel(message: types.Message):
@@ -208,7 +196,6 @@ async def list_users(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
     users = get_all_users()
     if not users:
-        await message.answer("В базе нет пользователей.")
         return
 
     text = "👥 <b>Список участников:</b>\n\n"
@@ -305,10 +292,6 @@ async def reject_user(callback: types.CallbackQuery):
     if get_user_role(callback.from_user.id) != "admin": return
     user_id = int(callback.data.split(":")[1])
     await callback.message.edit_text(f"❌ Пользователь <code>{user_id}</code> отклонен.")
-    try:
-        await bot.send_message(user_id, "❌ Ваша заявка отклонена администратором.")
-    except:
-        pass
     await callback.answer()
 
 @dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
